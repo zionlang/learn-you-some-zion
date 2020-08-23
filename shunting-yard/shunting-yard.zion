@@ -96,8 +96,6 @@ fn main() {
           operands.apply(top_operator)
         }
       }
-    } else if term == "(" {
-      operators.push(Op(term, -1))
     } else {
       let Rule(cur_precedence, cur_assoc) = term.rule
       while operators.peek is Just(Op(top_operator, top_precedence)) {
