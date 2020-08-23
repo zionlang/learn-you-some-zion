@@ -1,0 +1,121 @@
+import vector {shrink_to}
+import sys {args}
+
+data Expr {
+  ETerm(String)
+  EOp(String, Expr, Expr)
+}
+
+instance Str Expr {
+  fn str(a) => match a {
+    ETerm(s) => s
+    EOp(op, lhs, rhs) => "(${lhs} ${op} ${rhs})"
+  }
+}
+
+fn push(xs, x) => xs.append(x)
+fn peek(xs) => len(xs) != 0 ? Just(xs[len(xs)-1]) : Nothing
+fn pop(xs) => match peek(xs) {
+   jx@Just(_) {
+    xs.shrink_to(len(xs)-1)
+    jx
+  }
+  Nothing => Nothing
+}
+
+data Assoc {
+  ALeft
+  ARight
+}
+
+instance Eq Assoc {
+  fn ==(a, b) => match (a, b) {
+    (ALeft, ALeft) => True
+    (ARight, ARight) => True
+    _ => False
+  }
+}
+
+newtype Rule = Rule(Int, Assoc)
+let known_operators = {
+  "+": Rule(1, ALeft),
+  "-": Rule(1, ALeft),
+  "*": Rule(2, ALeft),
+  "/": Rule(2, ALeft),
+  "^": Rule(3, ARight),
+}
+let parentheses = ["(", ")"]
+
+fn is_operand(term) {
+  return term not in known_operators and term not in parentheses
+}
+
+fn rule(op) {
+  if known_operators[op] is Just(rule) {
+    return rule
+  } else {
+    assert(False)
+    return Rule(0, ALeft)
+  }
+}
+
+data Op {
+  Op(String, Int)
+  NoOp
+}
+
+fn apply(operands, operator) {
+  assert(len(operands) >= 2)
+  if operands.pop is Just(rhs) {
+    if operands.pop is Just(lhs) {
+      operands.push(EOp(operator, lhs, rhs))
+      return
+    }
+  }
+  print("failed to apply ${operator} to ${operands}")
+}
+
+fn main() {
+  if len(args) != 2 {
+    print("give a quoted expression with ${" ".join(known_operators.keys)}")
+    return
+  }
+  let terms = args[1].split(" ")
+  # "a ^ q + b * c ^ d ^ e + f".split(" ")
+  let operands = new [Expr]
+  let operators = new [Op]
+  for term in terms {
+    if term.is_operand {
+      operands.push(ETerm(term))
+    } else if term == "(" {
+      operators.push(Op(term, -1))
+    } else if term == ")" {
+      while operators.pop is Just(Op(top_operator, _)) {
+        if top_operator == "(" {
+          break
+        } else {
+          operands.apply(top_operator)
+        }
+      }
+    } else if term == "(" {
+      operators.push(Op(term, -1))
+    } else {
+      let Rule(cur_precedence, cur_assoc) = term.rule
+      while operators.peek is Just(Op(top_operator, top_precedence)) {
+        if top_operator != "(" and (
+          top_precedence > cur_precedence or (top_precedence == cur_precedence and cur_assoc == ALeft)) {
+          operands.apply(top_operator)
+          operators.pop!
+        } else {
+          break
+        }
+      }
+      operators.push(Op(term, cur_precedence))
+    }
+  }
+  while operators.peek is Just(Op(operator, _)) {
+    operands.apply(operator)
+    operators.pop!
+  }
+  print(operands)
+}
