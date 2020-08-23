@@ -77,11 +77,10 @@ fn apply(operands, operator) {
 
 fn main() {
   if len(args) != 2 {
-    print("give a quoted expression with ${" ".join(known_operators.keys)}")
+    print("give a quoted expression with {${" ".join(known_operators.keys)}}.\nnote that all terms and operators must be separated by a space.\nlike: \"a + b ^ c ^ d - ( e - f - g ) ^ 42\"")
     return
   }
   let terms = args[1].split(" ")
-  # "a ^ q + b * c ^ d ^ e + f".split(" ")
   let operands = new [Expr]
   let operators = new [Op]
   for term in terms {
