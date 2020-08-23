@@ -174,14 +174,12 @@ instance Str Token {
 }
 
 fn main() {
-  /*
   for (op, Rule(_, fixities)) in known_operators {
-    if Infix in fixities and Postfix in fixities {
+    if fixities.any(.is_infix) and fixities.any(.is_postfix) {
       print("illegal rule treating operator ${op} as both Infix and Postfix")
       return
     }
   }
-  */
   let verbose = "-v" in args
   let terms = [term.strip for term in args[1].split(" ") if term.strip.len > 0 and term != "-v"]
   if len(terms) == 0 {
