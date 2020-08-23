@@ -12,8 +12,8 @@ instance Str Expr {
   fn str(a) => match a {
     ETerm(s) => s
     EOp(op, lhs, rhs) => "(${lhs} ${op} ${rhs})"
-    EPrefix(op, rhs) => "${op}${rhs}"
-    EPostfix(op, rhs) => "${rhs}${op}"
+    EPrefix(op, rhs) => "(${op}${rhs})"
+    EPostfix(op, rhs) => "(${rhs}${op})"
   }
 }
 
@@ -40,20 +40,67 @@ instance Eq Assoc {
   }
 }
 
-newtype Rule = Rule(Int, Assoc, [Fixity])
+instance Str Assoc {
+  fn str(a) => match a {
+    ALeft => "ALeft"
+    ARight => "ARight"
+  }
+}
+
+newtype Rule = Rule(Int, [Fixity])
 data Fixity {
-  Infix
+  Infix(Assoc)
   Prefix
   Postfix
 }
 
+instance Str Fixity {
+  fn str(f) => match f {
+    Infix(assoc) => "Infix(${assoc})"
+    Prefix       => "Prefix"
+    Postfix      => "Postfix"
+  }
+}
+
+fn is_unary(a) => match a {
+  Infix(_) => False
+} else => True
+
+fn is_prefix(a) => match a {
+  Prefix => True
+} else => False
+
+fn is_postfix(a) => match a {
+  Postfix => True
+} else => False
+
+fn is_infix(a) => match a {
+  Infix(_) => True
+} else => False
+
+fn assoc(a) => match a {
+  Infix(assoc) => assoc
+  Prefix       => ARight
+  Postfix      => ALeft
+}
+
+fn arity(a) => match a {
+  Infix(_) => 2
+  Prefix   => 1
+  Postfix  => 1
+}
+
 let known_operators = {
-  "+": Rule(1, ALeft, [Infix]),
-  "-": Rule(1, ALeft, [Infix, Prefix]),
-  "*": Rule(2, ALeft, [Infix]),
-  "/": Rule(2, ALeft, [Infix]),
-  "^": Rule(3, ARight, [Infix]),
-  "++": Rule(3, ARight, [Postfix, Prefix]),
+  "+": Rule(1, [Infix(ALeft)]),
+  "-": Rule(1, [Infix(ALeft), Prefix]),
+  "*": Rule(2, [Infix(ALeft)]),
+  "/": Rule(2, [Infix(ALeft)]),
+  # Exponentials are typically right-associative
+  "^": Rule(3, [Infix(ARight)]),
+  "++": Rule(3, [Postfix, Prefix]),
+
+  # Just to test that higher precedence postfix operator can bind more tightly than a prefix operator 
+  "--": Rule(4, [Postfix, Prefix]),
 }
 let parentheses = ["(", ")"]
 
@@ -66,17 +113,29 @@ fn rule(op) {
     return rule
   } else {
     assert(False)
-    return Rule(0, ALeft, [])
+    return Rule(0, [])
   }
 }
 
 data Op {
-  Op(String, Int)
+  Op(String, Int, Fixity)
   NoOp
 }
 
-fn apply(operands, operator) {
-  assert(len(operands) >= 2)
+instance Str Op {
+  fn str(a) => match a {
+    Op(s, i, f) => "Op(${s}, ${i}, ${f})"
+    NoOp        => "NoOp"
+  }
+}
+
+fn apply(operands, operator, fixity) => match fixity {
+  Infix(_) => apply_binary(operands, operator)
+  Prefix   => apply_unary(operands, operator, EPrefix)
+  Postfix  => apply_unary(operands, operator, EPostfix)
+}
+
+fn apply_binary(operands, operator) {
   if operands.pop is Just(rhs) {
     if operands.pop is Just(lhs) {
       operands.push(EOp(operator, lhs, rhs))
@@ -84,6 +143,14 @@ fn apply(operands, operator) {
     }
   }
   print("failed to apply ${operator} to ${operands}")
+}
+
+fn apply_unary(operands, operator, ctor) {
+  if operands.pop is Just(expr) {
+    operands.push(ctor(operator, expr))
+    return
+  }
+  print("failed to apply unary ${operator} to ${operands}")
 }
 
 data Token {
@@ -99,17 +166,39 @@ instance Eq Token {
   }
 }
 
+instance Str Token {
+  fn str(a) => match a {
+    Operator => "Operator"
+    Operand => "Operand"
+  }
+}
+
 fn main() {
-  if len(args) != 2 {
+  /*
+  for (op, Rule(_, fixities)) in known_operators {
+    if Infix in fixities and Postfix in fixities {
+      print("illegal rule treating operator ${op} as both Infix and Postfix")
+      return
+    }
+  }
+  */
+  let verbose = "-v" in args
+  let terms = [term.strip for term in args[1].split(" ") if term.strip.len > 0 and term != "-v"]
+  if len(terms) == 0 {
     print("give a quoted expression with {${" ".join(known_operators.keys)}}.\nnote that all terms and operators must be separated by a space.\nlike: \"a + b ^ c ^ d - ( e - f - g ) ^ 42\"")
     return
   }
-  let terms = [term.strip for term in args[1].split(" ") if term.strip.len > 0]
   let operands = new [Expr]
   let operators = new [Op]
   var last_token = Operator
   var last_term = ""
-  for term in (t.strip for t in terms) {
+  for term in terms {
+    if verbose {
+      print("LOOP: ${term}")
+      print("operands = ${operands}")
+      print("operators = ${operators}")
+      print("last_token = ${last_token}")
+    }
     if term.is_operand {
       if last_token == Operand {
         print("juxtaposition is not-impl [${last_term}, ${term}]")
@@ -119,35 +208,65 @@ fn main() {
       operands.push(ETerm(term))
     } else if term == "(" {
       last_token = Operator
-      operators.push(Op(term, -1))
+      operators.push(Op(term, -1, Prefix))
     } else if term == ")" {
       last_token = Operand
-      while operators.pop is Just(Op(top_operator, _)) {
+      while operators.pop is Just(Op(top_operator, _, fixity)) {
         if top_operator == "(" {
           break
         } else {
-          operands.apply(top_operator)
+          operands.apply(top_operator, fixity)
         }
       }
     } else {
-      let Rule(cur_precedence, cur_assoc, cur_fixities) = term.rule
-      while operators.peek is Just(Op(top_operator, top_precedence)) {
-        if top_operator != "(" and (
-          top_precedence > cur_precedence or (top_precedence == cur_precedence and cur_assoc == ALeft)) {
-          operands.apply(top_operator)
-          operators.pop!
-        } else {
-          break
+      let Rule(cur_precedence, cur_fixities) = term.rule
+      if infer_fixity(term, last_token, cur_fixities) is Just(cur_fixity) {
+        while operators.peek is Just(Op(top_operator, top_precedence, top_fixity)) {
+          if top_operator != "(" and (
+            top_precedence > cur_precedence or (top_precedence == cur_precedence and cur_fixity.assoc == ALeft)) and
+            (top_fixity.arity <= cur_fixity.arity) {
+            operands.apply(top_operator, top_fixity)
+            operators.pop!
+          } else {
+            break
+          }
         }
+        operators.push(Op(term, cur_precedence, cur_fixity))
+        if cur_fixity.is_postfix {
+          last_token = Operand
+        } else {
+          last_token = Operator
+        } 
+      } else {
+        return
       }
-      operators.push(Op(term, cur_precedence))
-      last_token = Operator
     }
     last_term = term
   }
-  while operators.peek is Just(Op(operator, _)) {
-    operands.apply(operator)
+  while operators.peek is Just(Op(operator, _, fixity)) {
+    operands.apply(operator, fixity)
     operators.pop!
   }
   print(operands)
+}
+
+fn infer_fixity(term String, last_token Token, cur_fixities [Fixity]) Maybe Fixity {
+  if last_token == Operand {
+    # Looking for infix and postfix operators
+    for fixity in cur_fixities {
+      if fixity.is_infix {
+        return Just(fixity)
+      } else if fixity.is_postfix {
+        return Just(fixity)
+      }
+    }
+    print("illegal operator ${term} encountered (last_token == Operand, term == ${term})")
+    return Nothing
+  } else if cur_fixities.any(.is_prefix) {
+    # Looking for prefix unary operators
+    return Just(Prefix)
+  } else {
+    print("illegal operator ${term} encountered (last_token == Operand, term == ${term})")
+    return Nothing
+  }
 }
